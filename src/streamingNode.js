@@ -615,15 +615,19 @@ function executeQueueEngine(guildId) {
         new ButtonBuilder().setCustomId('btn_playlist').setLabel('Playlist').setEmoji('📋').setStyle(ButtonStyle.Secondary)
     );
 
+    // Search the active guild caches for the spinning disk emoji
+    const playingEmoji = client.emojis.cache.find(e => e.name === 'playing');
+    const authorIconUrl = playingEmoji ? playingEmoji.url : 'https://i.imgur.com/8PTJqN9.gif'; // Fallback to generic spinning disk if missing
+
     const embed = new EmbedBuilder()
         .setColor('#161618')
-        .setImage('https://i.imgur.com/dK5zVf7.jpeg') // Thematic SpaceJamz Banner default
-        .setTitle(`💿 ${activeTrack.title}`)
+        .setImage('https://i.imgur.com/dK5zVf7.jpeg') // Thematic SpaceJamz Banner
+        .setAuthor({ name: activeTrack.title, iconURL: authorIconUrl })
         .addFields(
-            { name: '🙋 Requested By', value: `\`${activeTrack.requester || 'SpaceJamz Node'}\``, inline: true },
-            { name: '🎧 Music Author', value: `\`Network Artifact\``, inline: true },
-            { name: '🔄 Queue length', value: `\`${queue.songs.length} songs\``, inline: true },
-            { name: '⏱️ Duration', value: `\`Live Stream\``, inline: true }
+            { name: '🙋 Requested By', value: `${activeTrack.requester || '@SpaceJamz'}`, inline: true },
+            { name: '🎧 Music Author', value: `Unknown Artifact`, inline: true },
+            { name: '🔄 Queue length', value: `${queue.songs.length} songs`, inline: true },
+            { name: '⏱️ Music Duration', value: `Live Stream`, inline: true }
         );
         
     if (activeTrack.thumbnail) embed.setThumbnail(activeTrack.thumbnail);
