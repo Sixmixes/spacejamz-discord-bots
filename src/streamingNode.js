@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField, EmbedBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, NoSubscriberBehavior, StreamType, getVoiceConnection } = require('@discordjs/voice');
 const youtubedl = require('youtube-dl-exec');
 
@@ -75,22 +75,46 @@ client.on('interactionCreate', async interaction => {
     const { customId } = interaction;
     const title = serverQueue.songs[0].title;
 
+    if (customId === 'btn_voldown') {
+        serverQueue.volume = Math.max(0.1, serverQueue.volume - 0.2);
+        if (serverQueue.currentResource && serverQueue.currentResource.volume) {
+            serverQueue.currentResource.volume.setVolume(serverQueue.volume);
+        }
+        return interaction.reply({ content: `🔉 **${polishedName} Gain:** Rendered down to ${(serverQueue.volume * 100).toFixed(0)}%`, ephemeral: true });
+    }
+
+    if (customId === 'btn_volup') {
+        serverQueue.volume = Math.min(2.0, serverQueue.volume + 0.2);
+        if (serverQueue.currentResource && serverQueue.currentResource.volume) {
+            serverQueue.currentResource.volume.setVolume(serverQueue.volume);
+        }
+        return interaction.reply({ content: `🔊 **${polishedName} Gain:** Spiked up to ${(serverQueue.volume * 100).toFixed(0)}%`, ephemeral: true });
+    }
+
+    if (customId === 'btn_back') {
+        if (serverQueue.history.length === 0) return interaction.reply({ content: `Matrix Engineering: History buffer is currently empty.`, ephemeral: true });
+        const lastSong = serverQueue.history.pop();
+        serverQueue.songs.unshift(lastSong); 
+        serverQueue.forceBack = true;
+        serverQueue.player.stop();
+        return interaction.update({ content: `⏮️ **${polishedName}** rewound the timeline matrix.`, components: [] });
+    }
+
     if (customId === 'btn_pause') {
         const stateStatus = serverQueue.player.state.status;
         if (stateStatus === AudioPlayerStatus.Paused || stateStatus === AudioPlayerStatus.AutoPaused) {
             serverQueue.player.unpause();
-            return interaction.update({ content: `▶️ **${polishedName}** dynamically streaming -> **${title}**`, components: interaction.message.components });
+            return interaction.reply({ content: `▶️ **${polishedName}** dynamically streaming -> **${title}**`, ephemeral: true });
         } else {
             serverQueue.player.pause();
-            return interaction.update({ content: `⏸️ **${polishedName}** physically paused -> **${title}**`, components: interaction.message.components });
+            return interaction.reply({ content: `⏸️ **${polishedName}** physically paused -> **${title}**`, ephemeral: true });
         }
     }
 
     if (customId === 'btn_skip') {
         serverQueue.forceSkip = true;
         serverQueue.player.stop();
-        // Remove buttons from the bypassed track so they can't be clicked later
-        return interaction.update({ content: `⏭️ **${polishedName}** securely bypassed -> **${title}**`, components: [] });
+        return interaction.update({ content: `⏭️ **${polishedName}** securely bypassed the track.`, embeds: interaction.message.embeds, components: [] });
     }
 
     if (customId === 'btn_stop') {
@@ -102,10 +126,10 @@ client.on('interactionCreate', async interaction => {
         const conn = getVoiceConnection(interaction.guildId);
         if (conn) conn.destroy();
         globalQueues.delete(interaction.guildId);
-        return interaction.update({ content: `🔌 **${polishedName}** detached from the main network.`, components: [] });
+        return interaction.update({ content: `🔌 **${polishedName}** detached from the main network.`, embeds: interaction.message.embeds, components: [] });
     }
 
-    if (customId === 'btn_queue') {
+    if (customId === 'btn_playlist' || customId === 'btn_queue') {
         if (serverQueue.songs.length === 0) return interaction.reply({ content: `🗂️ **Buffer:** Empty.`, ephemeral: true });
         
         const totalSongs = serverQueue.songs.length;
@@ -126,8 +150,19 @@ client.on('interactionCreate', async interaction => {
             [upcoming[i], upcoming[j]] = [upcoming[j], upcoming[i]];
         }
         serverQueue.songs = [serverQueue.songs[0], ...upcoming];
-        // Don't reply, just acknowledge quietly so it edits the original message.
-        return interaction.update({ content: `🔀 **${polishedName}** mathematically scrambled the upcoming timeline! -> **${title}**`, components: interaction.message.components });
+        return interaction.reply({ content: `🔀 **${polishedName}** mathematically scrambled the upcoming timeline!`, ephemeral: true });
+    }
+
+    if (customId === 'btn_loop') {
+        const flow = { 'none': 'song', 'song': 'queue', 'queue': 'none' };
+        serverQueue.loopMode = flow[serverQueue.loopMode];
+        return interaction.reply({ content: `♾️ **${polishedName} Auto-Loop:** Matrix core sequence set to \`${serverQueue.loopMode}\`.`, ephemeral: true });
+    }
+
+    if (customId === 'btn_autoplay') {
+        serverQueue.autoplay = !serverQueue.autoplay;
+        const msg = serverQueue.autoplay ? `✅ Sub-Neural **AutoPlay** Engine Engaged.` : `⛔ Sub-Neural **AutoPlay** Engine Disengaged.`;
+        return interaction.reply({ content: msg, ephemeral: true });
     }
 });
 
@@ -490,10 +525,13 @@ function createEmptyQueue(message, voiceChannel) {
         connection: null,
         player: player,
         songs: [],
+        history: [], // Historical buffer for back rewinds
         playing: false,
         inactivityTimer: null,
         forceSkip: false,
+        forceBack: false,
         volume: 1.0,
+        autoplay: false,
         loopMode: 'none',
         currentResource: null
     };
@@ -507,17 +545,20 @@ function createEmptyQueue(message, voiceChannel) {
         queueObj.playing = false;
         const prevSong = queueObj.songs[0];
         
-        if (queueObj.forceSkip) {
+        if (queueObj.forceBack) {
+            queueObj.forceBack = false;
+            // The array has already been prepended internally by the interaction handler
+        } else if (queueObj.forceSkip) {
             queueObj.forceSkip = false;
-            queueObj.songs.shift(); 
+            queueObj.history.push(queueObj.songs.shift()); 
         } else {
             if (queueObj.loopMode === 'song') {
                 // Do not alter index 0
             } else if (queueObj.loopMode === 'queue') {
-                queueObj.songs.shift();
+                queueObj.history.push(queueObj.songs.shift());
                 if (prevSong) queueObj.songs.push(prevSong);
             } else {
-                queueObj.songs.shift(); 
+                queueObj.history.push(queueObj.songs.shift()); 
             }
         }
         executeQueueEngine(message.guild.id); 
@@ -555,33 +596,41 @@ function executeQueueEngine(guildId) {
     const activeTrack = queue.songs[0];
     
     // GUI Button Generator Architecture
-    const row = new ActionRowBuilder()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('btn_pause')
-                .setEmoji('⏯️')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('btn_skip')
-                .setEmoji('⏭️')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId('btn_queue')
-                .setEmoji('🗂️')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('btn_shuffle')
-                .setEmoji('🔀')
-                .setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder()
-                .setCustomId('btn_stop')
-                .setEmoji('⏹️')
-                .setStyle(ButtonStyle.Danger),
+    const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_voldown').setLabel('Down').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_back').setLabel('Back').setEmoji('⏮️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_pause').setLabel('Pause').setEmoji('⏯️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('btn_skip').setLabel('Skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_volup').setLabel('Up').setEmoji('🔊').setStyle(ButtonStyle.Secondary)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_shuffle').setLabel('Shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_loop').setLabel('Loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('btn_stop').setLabel('Stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('btn_autoplay').setLabel('AutoPlay').setEmoji('💽').setStyle(ButtonStyle.Secondary)
+    );
+
+    const row3 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_playlist').setLabel('Playlist').setEmoji('📋').setStyle(ButtonStyle.Secondary)
+    );
+
+    const embed = new EmbedBuilder()
+        .setColor('#161618')
+        .setImage('https://i.imgur.com/dK5zVf7.jpeg') // Thematic SpaceJamz Banner default
+        .setTitle(`💿 ${activeTrack.title}`)
+        .addFields(
+            { name: '🙋 Requested By', value: `\`${activeTrack.requester || 'SpaceJamz Node'}\``, inline: true },
+            { name: '🎧 Music Author', value: `\`Network Artifact\``, inline: true },
+            { name: '🔄 Queue length', value: `\`${queue.songs.length} songs\``, inline: true },
+            { name: '⏱️ Duration', value: `\`Live Stream\``, inline: true }
         );
+        
+    if (activeTrack.thumbnail) embed.setThumbnail(activeTrack.thumbnail);
 
     queue.textChannel.send({
-        content: `▶️ **${polishedName}** dynamically streaming -> **${activeTrack.title}**`,
-        components: [row]
+        embeds: [embed],
+        components: [row1, row2, row3]
     });
 
     const subprocess = youtubedl.exec(activeTrack.url, {
@@ -594,7 +643,10 @@ function executeQueueEngine(guildId) {
         // This prevents the UnhandledRejection module from executing 3MB binary FFMPEG stdout dumps into console.error
     });
     
-    let resource = createAudioResource(subprocess.stdout, { inputType: StreamType.Arbitrary });
+    let resource = createAudioResource(subprocess.stdout, { inputType: StreamType.Arbitrary, inlineVolume: true });
+    if (resource.volume) {
+        resource.volume.setVolume(queue.volume);
+    }
 
     queue.currentResource = resource;
     queue.player.play(resource);
