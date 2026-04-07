@@ -617,12 +617,14 @@ function executeQueueEngine(guildId) {
 
     // Search the active guild caches for the spinning disk emoji
     const playingEmoji = client.emojis.cache.find(e => e.name === 'playing');
-    const authorIconUrl = playingEmoji ? playingEmoji.url : 'https://i.imgur.com/8PTJqN9.gif'; // Fallback to generic spinning disk if missing
+    const authorIconUrl = playingEmoji ? playingEmoji.url : null; 
+
+    // If no icon found, just prepend a standard CD emoji to the title string
+    const authorNameLabel = authorIconUrl ? activeTrack.title : `💿 ${activeTrack.title}`;
 
     const embed = new EmbedBuilder()
         .setColor('#161618')
-        .setImage('https://i.imgur.com/dK5zVf7.jpeg') // Thematic SpaceJamz Banner
-        .setAuthor({ name: activeTrack.title, iconURL: authorIconUrl })
+        .setAuthor({ name: authorNameLabel, iconURL: authorIconUrl || undefined })
         .addFields(
             { name: '🙋 Requested By', value: `${activeTrack.requester || '@SpaceJamz'}`, inline: true },
             { name: '🎧 Music Author', value: `Unknown Artifact`, inline: true },
@@ -647,10 +649,8 @@ function executeQueueEngine(guildId) {
         // This prevents the UnhandledRejection module from executing 3MB binary FFMPEG stdout dumps into console.error
     });
     
-    let resource = createAudioResource(subprocess.stdout, { inputType: StreamType.Arbitrary, inlineVolume: true });
-    if (resource.volume) {
-        resource.volume.setVolume(queue.volume);
-    }
+    // NATIVE VOLUME SCALING DISABLED - C++ OPUS BINDINGS MISSING ON SERVER
+    let resource = createAudioResource(subprocess.stdout, { inputType: StreamType.Arbitrary });
 
     queue.currentResource = resource;
     queue.player.play(resource);
