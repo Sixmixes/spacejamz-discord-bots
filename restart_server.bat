@@ -1,0 +1,6 @@
+@echo off
+echo Force stopping SpaceJamz Linux Server (spacejamz-bots)...
+call gcloud compute instances stop spacejamz-bots --zone=us-central1-a --quiet
+echo Starting SpaceJamz Linux Server (spacejamz-bots)...
+call gcloud compute instances start spacejamz-bots --zone=us-central1-a --quiet
+echo Server restart sequence completed. Please wait a minute or two for the server to fully boot up.

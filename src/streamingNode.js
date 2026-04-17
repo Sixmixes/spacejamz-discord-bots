@@ -408,6 +408,27 @@ client.on('messageCreate', async (message) => {
             }
         }
 
+        // Custom Spotify Semantic Extraction Override
+        if (url.includes('spotify.com/track/')) {
+            const m = await message.reply(`⏱️ **${polishedName}** is decrypting Spotify track matrix...`);
+            try {
+                const res = await fetch(url);
+                const html = await res.text();
+                
+                const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+                if (titleMatch && titleMatch[1]) {
+                    // Extract track name and artist while stripping Spotify branding. Result format: "TrackName Artist"
+                    const spotifyTitleOverride = titleMatch[1].replace(/ - song and lyrics by /gi, ' ').replace(/ \| Spotify/gi, '').trim();
+                    url = spotifyTitleOverride;
+                    m.edit(`🔓 **Spotify Decrypted:** Rerouting natively via youtube search -> \`${url}\``);
+                } else {
+                    return m.edit("Matrix Protocol: Spotify extraction failed. Anti-Bot Firewall intact.");
+                }
+            } catch (err) {
+                return m.edit("Matrix Protocol: Spotify redirect layer timed out. Node disconnected.");
+            }
+        }
+
         // Generate Metadata asynchronously without freezing event loop
         let isDirectUrl = false;
         try { new URL(url); isDirectUrl = true; } catch (e) {}
