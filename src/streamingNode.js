@@ -1,6 +1,8 @@
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionsBitField, EmbedBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus, NoSubscriberBehavior, StreamType, getVoiceConnection } = require('@discordjs/voice');
 const youtubedl = require('youtube-dl-exec');
+const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
 
 const nodeName = process.env.NODE_NAME || 'UNKNOWN_NODE';
 const nodeSuffix = nodeName.split('_').pop().toLowerCase();
@@ -73,7 +75,8 @@ client.on('interactionCreate', async interaction => {
     }
 
     const { customId } = interaction;
-    const title = serverQueue.songs[0].title;
+    const activeSong = serverQueue.songs[0];
+    const title = activeSong ? activeSong.title : "Unknown Artifact";
 
     if (customId === 'btn_voldown') {
         serverQueue.volume = Math.max(0.1, serverQueue.volume - 0.2);
@@ -351,7 +354,11 @@ client.on('messageCreate', async (message) => {
         const vol = parseInt(args[1]);
         if (isNaN(vol) || vol < 1 || vol > 200) return message.reply(`Matrix Protocol: Provide target bandwidth (1-200).`);
         
-        return message.reply(`⚠️ **Volume C++ Matrix Missing:** The native volume slider requires complex \`node-gyp\` audio dependencies that are missing from the micro-server. Volume is currently locked to \`100%\`.`);
+        serverQueue.volume = vol / 100;
+        if (serverQueue.currentResource && serverQueue.currentResource.volume) {
+            serverQueue.currentResource.volume.setVolume(serverQueue.volume);
+        }
+        return message.reply(`🔊 **${polishedName} Gain:** Target locked at ${(serverQueue.volume * 100).toFixed(0)}%`);
     }
 
     if (isRm) {
@@ -387,7 +394,12 @@ client.on('messageCreate', async (message) => {
         if ((url.includes('suno.com') || url.includes('suno.ai')) && !url.includes('/playlist/')) {
             const m = await message.reply(`⏱️ **${polishedName}** is bypassing Suno Neural Firewalls...`);
             try {
-                const res = await fetch(url);
+                const res = await fetch(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    }
+                });
                 const html = await res.text();
                 
                 const titleMatch = html.match(/<title>(.*?)<\/title>/i);
@@ -396,12 +408,14 @@ client.on('messageCreate', async (message) => {
                 }
 
                 const finalUrl = res.url || url;
-                if (finalUrl.includes('/song/')) {
-                    const uuid = finalUrl.split('/song/')[1].split('?')[0].replace(/\//g, '');
+                const uuidMatch = finalUrl.match(/\/song\/([a-f0-9-]+)/i) || html.match(/\/song\/([a-f0-9-]+)/i);
+                
+                if (uuidMatch && uuidMatch[1]) {
+                    const uuid = uuidMatch[1];
                     url = `https://cdn1.suno.ai/${uuid}.mp3`;
                     m.edit(`🔓 **Suno Extracted:** Neural link established.`);
                 } else {
-                    return m.edit("Matrix Protocol: Suno extraction failed. Firewall intact.");
+                    return m.edit("Matrix Protocol: Suno extraction failed. UUID not discovered.");
                 }
             } catch (err) {
                 return m.edit("Matrix Protocol: Suno redirect layer timed out.");
@@ -703,8 +717,25 @@ function executeQueueEngine(guildId) {
         // This prevents the UnhandledRejection module from executing 3MB binary FFMPEG stdout dumps into console.error
     });
     
-    // NATIVE VOLUME SCALING DISABLED - C++ OPUS BINDINGS MISSING ON SERVER
-    let resource = createAudioResource(subprocess.stdout, { inputType: StreamType.Arbitrary });
+    // Transcode to PCM s16le for software volume scaling
+    const transcoder = spawn(ffmpegPath, [
+        '-i', 'pipe:0',
+        '-f', 's16le',
+        '-ar', '48000',
+        '-ac', '2',
+        'pipe:1'
+    ], { stdio: ['pipe', 'pipe', 'ignore'] });
+
+    subprocess.stdout.pipe(transcoder.stdin);
+
+    const resource = createAudioResource(transcoder.stdout, { 
+        inputType: StreamType.Raw,
+        inlineVolume: true
+    });
+    
+    if (resource.volume) {
+        resource.volume.setVolume(queue.volume);
+    }
 
     queue.currentResource = resource;
     queue.player.play(resource);
