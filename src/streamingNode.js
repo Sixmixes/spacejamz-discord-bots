@@ -177,7 +177,7 @@ client.on('messageCreate', async (message) => {
     }
 
     if (message.content === `${sym}help`) {
-        return message.reply(`🎶 **${polishedName} Cypher Array Menu** 🎶\n\n• \`${sym}play <url/search>\` / \`${sym}p\` — YouTube, SoundCloud, or Discord Attachments.\n• \`${sym}join\` — Mount the matrix quietly.\n• \`${sym}skip\` / \`${sym}s\` — Skip the current track.\n• \`${sym}pause\` / \`${sym}resume\` — Halt/Restore UDP traffic.\n• \`${sym}volume <1-100>\` / \`${sym}vol\` — Adjust temporal bandwidth gain.\n• \`${sym}loop <none|song|queue>\` — Infinite loop sequencing.\n• \`${sym}remove <index>\` / \`${sym}rm\` — Delete a specific queue index.\n• \`${sym}queue\` / \`${sym}q\` — Inspect the active playlist array.\n• \`${sym}np\` — Now Playing metadata.\n• \`${sym}clear\` — Purge the queue memory entirely.\n• \`${sym}stop\` / \`${sym}leave\` / \`${sym}dc\` — Detach connection.\n\n*SpaceJamz Studio V3 Cluster Engine*`);
+        return message.reply(`🎶 **${polishedName} Cypher Array Menu** 🎶\n\n• \`${sym}play <url/search>\` / \`${sym}p\` — YouTube, SoundCloud, BandLab, or Discord attachments.\n• \`${sym}join\` — Mount the matrix quietly.\n• \`${sym}skip\` / \`${sym}s\` — Skip the current track.\n• \`${sym}pause\` / \`${sym}resume\` — Halt/Restore UDP traffic.\n• \`${sym}volume <1-100>\` / \`${sym}vol\` — Adjust temporal bandwidth gain.\n• \`${sym}loop <none|song|queue>\` — Infinite loop sequencing.\n• \`${sym}remove <index>\` / \`${sym}rm\` — Delete a specific queue index.\n• \`${sym}queue\` / \`${sym}q\` — Inspect the active playlist array.\n• \`${sym}np\` — Now Playing metadata.\n• \`${sym}clear\` — Purge the queue memory entirely.\n• \`${sym}stop\` / \`${sym}leave\` / \`${sym}dc\` — Detach connection.\n\n*SpaceJamz Studio V3 Cluster Engine*`);
     }
 
     const commandStr = message.content.toLowerCase().trim();
@@ -382,8 +382,8 @@ client.on('messageCreate', async (message) => {
 
         const voiceChannel = message.member?.voice?.channel;
 
-        // Custom SpaceJamz Suno Override
-        let sunoTitleOverride = null;
+        // Custom Extraction Overrides
+        let customTitleOverride = null;
         if ((url.includes('suno.com') || url.includes('suno.ai')) && !url.includes('/playlist/')) {
             const m = await message.reply(`⏱️ **${polishedName}** is bypassing Suno Neural Firewalls...`);
             try {
@@ -392,7 +392,7 @@ client.on('messageCreate', async (message) => {
                 
                 const titleMatch = html.match(/<title>(.*?)<\/title>/i);
                 if (titleMatch && titleMatch[1]) {
-                    sunoTitleOverride = titleMatch[1].replace(' | Suno', '').replace(' - Suno', '').trim();
+                    customTitleOverride = titleMatch[1].replace(' | Suno', '').replace(' - Suno', '').trim();
                 }
 
                 const finalUrl = res.url || url;
@@ -429,6 +429,39 @@ client.on('messageCreate', async (message) => {
             }
         }
 
+        // Custom BandLab Extraction Override
+        if (url.includes('bandlab.com/track/') || url.includes('bandlab.com/post/')) {
+            const m = await message.reply(`⏱️ **${polishedName}** is accessing BandLab archives...`);
+            try {
+                const match = url.match(/\/(track|post)\/([a-f0-9-]+)/i);
+                if (match && match[2]) {
+                    const trackId = match[2];
+                    const apiUrl = `https://www.bandlab.com/api/v1.3/posts/${trackId}`;
+                    const res = await fetch(apiUrl);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.revision && data.revision.audioUrl) {
+                            url = data.revision.audioUrl;
+                            if (data.revision.title) {
+                                customTitleOverride = data.revision.title;
+                            }
+                            m.edit(`🔓 **BandLab Extracted:** Neural link established -> \`${customTitleOverride || 'Unknown Track'}\``);
+                        } else {
+                            return m.edit("Matrix Protocol: BandLab extraction failed. Audio URL not found.");
+                        }
+                    } else if (res.status === 403) {
+                        return m.edit("Matrix Protocol: BandLab Access Denied (403). This track might be private.");
+                    } else {
+                        return m.edit(`Matrix Protocol: BandLab API Error (${res.status}).`);
+                    }
+                } else {
+                    return m.edit("Matrix Protocol: Invalid BandLab link structure.");
+                }
+            } catch (err) {
+                return m.edit("Matrix Protocol: BandLab extraction layer encountered a fatal error.");
+            }
+        }
+
         // Generate Metadata asynchronously without freezing event loop
         let isDirectUrl = false;
         try { new URL(url); isDirectUrl = true; } catch (e) {}
@@ -438,7 +471,7 @@ client.on('messageCreate', async (message) => {
             url = `ytsearch1:${url}`;
         }
 
-        let titleBlock = sunoTitleOverride || url.split('/').pop().split('?')[0]; 
+        let titleBlock = customTitleOverride || url.split('/').pop().split('?')[0]; 
         const isDirectAudio = url.match(/\.(mp3|wav|m4a|ogg|flac)(\?|$)/i);
         
         try {
